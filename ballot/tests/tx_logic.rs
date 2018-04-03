@@ -7,8 +7,8 @@ extern crate rand;
 use exonum::{crypto::{self, PublicKey, SecretKey}, storage::{ListIndex, Snapshot}};
 use exonum_testkit::{TestKit, TestKitBuilder};
 
-use ballot::{BallotSchema, BallotService, NewProposal, Proposal, TxCreateVoter, TxNewProposals,
-             TxVoteProposal, Voter};
+use ballot::{BallotSchema, BallotService, Chairperson, NewProposal, Proposal, TxCreateVoter,
+             TxNewChairperson, TxNewProposals, TxVoteProposal, Voter};
 use ballot::constants::{INIT_WEIGHT, MAX_PROPOSALS};
 use constants::*;
 
@@ -35,6 +35,54 @@ fn test_create_voter() {
     assert_eq!(voter.pub_key(), &pubkey);
     assert_eq!(voter.name(), ALICE_NAME);
     assert_eq!(voter.weight(), INIT_WEIGHT);
+}
+
+#[test]
+fn test_first_voter_is_chairperson() {
+    let mut testkit = init_testkit();
+    let (tx, pubkey, _) = create_voter_tx(ALICE_NAME);
+    testkit.create_block_with_transaction(tx);
+
+    let chairperson = get_chairperson(&testkit);
+    assert_eq!(chairperson.pub_key(), &pubkey);
+    assert_eq!(chairperson.name(), ALICE_NAME);
+}
+
+#[test]
+fn test_change_chairperson() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let (tx_create_bob, bob_pubkey, _) = create_voter_tx(BOB_NAME);
+    let tx_change_chairperson_to_bob =
+        TxNewChairperson::new(&alice_pubkey, &bob_pubkey, &alice_key);
+
+    testkit.create_block_with_transactions(txvec![
+        tx_create_alice,
+        tx_create_bob,
+        tx_change_chairperson_to_bob
+    ]);
+
+    let chairperson = get_chairperson(&testkit);
+    assert_eq!(chairperson.pub_key(), &bob_pubkey);
+    assert_eq!(chairperson.name(), BOB_NAME);
+}
+
+#[test]
+fn test_change_chairperson_without_permission() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let (tx_create_bob, bob_pubkey, bob_key) = create_voter_tx(BOB_NAME);
+    let tx_change_chairperson_to_bob = TxNewChairperson::new(&alice_pubkey, &bob_pubkey, &bob_key);
+
+    testkit.create_block_with_transactions(txvec![
+        tx_create_alice,
+        tx_create_bob,
+        tx_change_chairperson_to_bob
+    ]);
+
+    let chairperson = get_chairperson(&testkit);
+    assert_eq!(chairperson.pub_key(), &alice_pubkey);
+    assert_eq!(chairperson.name(), ALICE_NAME);
 }
 
 #[test]
@@ -129,12 +177,14 @@ fn test_vote_proposal_twice() {
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
     let tx_new_proposals = new_proposals_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
     let tx_alice_vote_first_proposal = TxVoteProposal::new(&alice_pubkey, 0, &alice_key);
+    let tx_alice_vote_second_proposal = TxVoteProposal::new(&alice_pubkey, 1, &alice_key);
 
     testkit.create_block_with_transactions(txvec![
         tx_create_alice,
         tx_new_proposals,
         tx_alice_vote_first_proposal.clone(),
-        tx_alice_vote_first_proposal.clone()
+        tx_alice_vote_first_proposal.clone(),
+        tx_alice_vote_second_proposal
     ]);
 
     let alice = get_voter(&testkit, &alice_pubkey);
@@ -168,6 +218,13 @@ fn try_get_voter(testkit: &TestKit, pubkey: &PublicKey) -> Option<Voter> {
 
 fn get_voter(testkit: &TestKit, pubkey: &PublicKey) -> Voter {
     try_get_voter(testkit, pubkey).expect("No voter persisted")
+}
+
+fn get_chairperson(testkit: &TestKit) -> Chairperson {
+    let snapshot = testkit.snapshot();
+    BallotSchema::new(&snapshot)
+        .chairperson()
+        .expect("No chairperson persisted")
 }
 
 fn try_get_proposal(testkit: &TestKit, id: u64) -> Option<Proposal> {

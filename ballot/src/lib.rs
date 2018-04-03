@@ -46,6 +46,13 @@ encoding_struct! {
 }
 
 encoding_struct! {
+    struct Chairperson {
+        pub_key: &PublicKey,
+        name: &str,
+    }
+}
+
+encoding_struct! {
     struct Proposal {
         subject: &str,
         vote_count: u16,
@@ -75,6 +82,12 @@ impl<T: AsRef<Snapshot>> BallotSchema<T> {
         self.voters().get(pub_key)
     }
 
+    pub fn chairperson(&self) -> Option<Chairperson> {
+        let chairperson: ListIndex<&Snapshot, Chairperson> =
+            ListIndex::new("ballot.chairperson", self.view.as_ref());
+        chairperson.last()
+    }
+
     pub fn proposals(&self) -> ListIndex<&Snapshot, Proposal> {
         ListIndex::new("ballot.proposals", self.view.as_ref())
     }
@@ -100,6 +113,13 @@ impl<'a> BallotSchema<&'a mut Fork> {
     pub fn proposals_mut(&mut self) -> ListIndex<&mut Fork, Proposal> {
         ListIndex::new("ballot.proposals", &mut self.view)
     }
+
+    pub fn set_chairperson(&mut self, new_one: Chairperson) {
+        let mut chairperson: ListIndex<&mut Fork, Chairperson> =
+            ListIndex::new("ballot.chairperson", &mut self.view);
+        chairperson.clear();
+        chairperson.push(new_one);
+    }
 }
 
 transactions!{
@@ -109,6 +129,11 @@ transactions!{
         struct TxCreateVoter {
             pub_key: &PublicKey,
             name: &str,
+        }
+
+        struct TxNewChairperson {
+            pub_key: &PublicKey,
+            new_chairperson_pubkey: &PublicKey,
         }
 
         struct TxNewProposals {
@@ -132,10 +157,14 @@ pub enum Error {
     VoterPermissionRequired = 1,
     #[fail(display = "Excess max proposals")]
     ExcessMaxProposals = 2,
-    #[fail(display = "Proposal not exists")]
-    ProposalNotExists = 3,
+    #[fail(display = "Proposal none exists")]
+    ProposalNoneExists = 3,
     #[fail(display = "Voter already voted")]
     VoterAlreadyVoted = 4,
+    #[fail(display = "Chairperson permission required")]
+    ChairpersonPermissionRequired = 5,
+    #[fail(display = "Voter none exists")]
+    VoterNoneExists = 6,
 }
 
 impl From<Error> for ExecutionError {
@@ -155,9 +184,44 @@ impl Transaction for TxCreateVoter {
             let voter = Voter::new(self.pub_key(), self.name(), INIT_WEIGHT);
             println!("Create the voter: {:?}", voter);
             schema.voters_mut().put(self.pub_key(), voter);
+
+            if schema.chairperson().is_none() {
+                let chairperson = Chairperson::new(self.pub_key(), self.name());
+                println!("New chair person: {:?}", chairperson);
+                schema.set_chairperson(chairperson);
+            }
+
             Ok(())
         } else {
             Err(Error::VoterAlreadyExists)?
+        }
+    }
+}
+
+impl Transaction for TxNewChairperson {
+    fn verify(&self) -> bool {
+        self.verify_signature(self.pub_key())
+    }
+
+    fn execute(&self, view: &mut Fork) -> ExecutionResult {
+        let mut schema = BallotSchema::new(view);
+        let chairperson = schema.chairperson();
+        debug_assert!(chairperson.is_some());
+        let chairperson = chairperson.unwrap();
+        println!("Current chairperson: {:?}", chairperson);
+        if self.pub_key() != chairperson.pub_key() {
+            Err(Error::ChairpersonPermissionRequired)?
+        }
+
+        let voter = schema.voter(self.new_chairperson_pubkey());
+        if let Some(voter) = voter {
+            let new_chairperson = Chairperson::new(self.new_chairperson_pubkey(), voter.name());
+            println!("new chair person: {:?}", new_chairperson);
+            schema.set_chairperson(new_chairperson);
+
+            Ok(())
+        } else {
+            Err(Error::VoterNoneExists)?
         }
     }
 }
@@ -218,7 +282,7 @@ impl Transaction for TxVoteProposal {
                     Proposal::new(proposal.subject(), proposal.vote_count() + voter_weight);
                 proposals.set(self.id().into(), updated);
             } else {
-                Err(Error::ProposalNotExists)?
+                Err(Error::ProposalNoneExists)?
             }
         }
 
