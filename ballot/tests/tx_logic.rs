@@ -7,8 +7,8 @@ extern crate rand;
 use exonum::{crypto::{self, PublicKey, SecretKey}, storage::{ListIndex, Snapshot}};
 use exonum_testkit::{TestKit, TestKitBuilder};
 
-use ballot::{BallotSchema, BallotService, Chairperson, NewProposal, Proposal, TxCreateVoter,
-             TxNewChairperson, TxNewProposals, TxVoteProposal, Voter};
+use ballot::{BallotSchema, BallotService, Chairperson, NewProposal, Proposal, TxANewChairperson,
+             TxASetVoterActiveState, TxCreateVoter, TxNewProposals, TxVoteProposal, Voter};
 use ballot::constants::{INIT_WEIGHT, MAX_PROPOSALS};
 use constants::*;
 
@@ -35,6 +35,7 @@ fn test_create_voter() {
     assert_eq!(voter.pub_key(), &pubkey);
     assert_eq!(voter.name(), ALICE_NAME);
     assert_eq!(voter.weight(), INIT_WEIGHT);
+    assert_eq!(voter.is_active(), true);
 }
 
 #[test]
@@ -54,7 +55,7 @@ fn test_change_chairperson() {
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
     let (tx_create_bob, bob_pubkey, _) = create_voter_tx(BOB_NAME);
     let tx_change_chairperson_to_bob =
-        TxNewChairperson::new(&alice_pubkey, &bob_pubkey, &alice_key);
+        TxANewChairperson::new(&alice_pubkey, &bob_pubkey, &alice_key);
 
     testkit.create_block_with_transactions(txvec![
         tx_create_alice,
@@ -70,9 +71,9 @@ fn test_change_chairperson() {
 #[test]
 fn test_change_chairperson_without_permission() {
     let mut testkit = init_testkit();
-    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let (tx_create_alice, alice_pubkey, _alice_key) = create_voter_tx(ALICE_NAME);
     let (tx_create_bob, bob_pubkey, bob_key) = create_voter_tx(BOB_NAME);
-    let tx_change_chairperson_to_bob = TxNewChairperson::new(&alice_pubkey, &bob_pubkey, &bob_key);
+    let tx_change_chairperson_to_bob = TxANewChairperson::new(&bob_pubkey, &bob_pubkey, &bob_key);
 
     testkit.create_block_with_transactions(txvec![
         tx_create_alice,
@@ -83,6 +84,84 @@ fn test_change_chairperson_without_permission() {
     let chairperson = get_chairperson(&testkit);
     assert_eq!(chairperson.pub_key(), &alice_pubkey);
     assert_eq!(chairperson.name(), ALICE_NAME);
+}
+
+#[test]
+fn test_change_chairperson_to_inactive_voter() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let (tx_create_bob, bob_pubkey, _bob_key) = create_voter_tx(BOB_NAME);
+    let tx_deactive_bob =
+        TxASetVoterActiveState::new(&alice_pubkey, &bob_pubkey, false, &alice_key);
+    let tx_change_chairperson_to_bob =
+        TxANewChairperson::new(&alice_pubkey, &bob_pubkey, &alice_key);
+
+    testkit.create_block_with_transactions(txvec![
+        tx_create_alice,
+        tx_create_bob,
+        tx_deactive_bob,
+        tx_change_chairperson_to_bob
+    ]);
+
+    let bob = get_voter(&testkit, &bob_pubkey);
+    let chairperson = get_chairperson(&testkit);
+    assert_eq!(bob.is_active(), false);
+    assert_eq!(chairperson.pub_key(), &alice_pubkey);
+    assert_eq!(chairperson.name(), ALICE_NAME);
+}
+
+#[test]
+fn test_set_voter_active_state() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let (tx_create_bob, bob_pubkey, _bob_key) = create_voter_tx(BOB_NAME);
+    let tx_deactive_bob =
+        TxASetVoterActiveState::new(&alice_pubkey, &bob_pubkey, false, &alice_key);
+
+    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_create_bob, tx_deactive_bob]);
+
+    let bob = get_voter(&testkit, &bob_pubkey);
+    assert_eq!(bob.is_active(), false);
+
+    let tx_active_bob = TxASetVoterActiveState::new(&alice_pubkey, &bob_pubkey, true, &alice_key);
+    testkit.create_block_with_transaction(tx_active_bob);
+
+    let bob = get_voter(&testkit, &bob_pubkey);
+    assert_eq!(bob.is_active(), true);
+}
+
+#[test]
+fn test_chairperson_set_self_active_state() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let tx_deactive_chairperson_alice =
+        TxASetVoterActiveState::new(&alice_pubkey, &alice_pubkey, false, &alice_key);
+
+    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_deactive_chairperson_alice]);
+
+    let alice = get_voter(&testkit, &alice_pubkey);
+    assert_eq!(alice.is_active(), true);
+}
+
+#[test]
+fn test_set_voter_without_chairperson_permission() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, _alice_pubkey, _alice_key) = create_voter_tx(ALICE_NAME);
+    let (tx_create_bob, bob_pubkey, bob_key) = create_voter_tx(BOB_NAME);
+    let (tx_create_triss, triss_pubkey, _triss_key) = create_voter_tx(TRISS);
+
+    let tx_deactive_triss_by_bob =
+        TxASetVoterActiveState::new(&bob_pubkey, &triss_pubkey, false, &bob_key);
+
+    testkit.create_block_with_transactions(txvec![
+        tx_create_alice,
+        tx_create_bob,
+        tx_create_triss,
+        tx_deactive_triss_by_bob
+    ]);
+
+    let triss = get_voter(&testkit, &triss_pubkey);
+    assert_eq!(triss.is_active(), true);
 }
 
 #[test]
