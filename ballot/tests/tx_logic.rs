@@ -7,9 +7,11 @@ extern crate rand;
 use exonum::{crypto::{self, PublicKey, SecretKey}, storage::{ListIndex, Snapshot}};
 use exonum_testkit::{TestKit, TestKitBuilder};
 
-use ballot::{BallotSchema, BallotService, Chairperson, NewProposal, Proposal, TxANewChairperson,
-             TxASetVoterActiveState, TxCreateVoter, TxNewProposals, TxVoteProposal, Voter};
-use ballot::constants::{INIT_WEIGHT, MAX_PROPOSALS};
+use ballot::{constants::{INIT_WEIGHT, MAX_PROPOSALS},
+             models::{Chairperson, NewProposal, Proposal, Voter}, schema::BallotSchema,
+             service::BallotService,
+             transactions::{TxANewChairperson, TxASetVoterActiveState, TxCreateVoter,
+                            TxNewProposals, TxVoteProposal}};
 use constants::*;
 
 #[macro_use]
