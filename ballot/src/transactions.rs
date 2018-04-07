@@ -2,7 +2,7 @@ use exonum::{blockchain::{ExecutionError, ExecutionResult, Transaction}, crypto:
              messages::Message, storage::Fork};
 
 use constants::{INIT_WEIGHT, MAX_PROPOSALS, SERVICE_ID};
-use models::{Chairperson, NewProposal, Proposal, Voter};
+use models::{Chairperson, NewProposal, Proposal, Voter, Voting};
 use schema::BallotSchema;
 
 transactions!{
@@ -25,14 +25,15 @@ transactions!{
             active_state: bool,
         }
 
-        struct TxNewProposals {
+        struct TxNewVoting {
             pub_key: &PublicKey,
-            new_proposals: Vec<NewProposal>,
+            proposals: Vec<NewProposal>,
         }
 
         struct TxVoteProposal {
             pub_key: &PublicKey,
-            id: u16,
+            voting_id: u64,
+            proposal_id: u16,
         }
     }
 }
@@ -56,6 +57,8 @@ pub enum Error {
     VoterNoneExists = 6,
     #[fail(display = "Voter inactive")]
     VoterInactive = 7,
+    #[fail(display = "Voting none exists")]
+    VotingNoneExists = 8,
 }
 
 impl From<Error> for ExecutionError {
@@ -141,13 +144,13 @@ impl Transaction for TxASetVoterActiveState {
     }
 }
 
-impl Transaction for TxNewProposals {
+impl Transaction for TxNewVoting {
     fn verify(&self) -> bool {
         self.verify_signature(self.pub_key())
     }
 
     fn execute(&self, view: &mut Fork) -> ExecutionResult {
-        if self.new_proposals().len() > MAX_PROPOSALS as usize {
+        if self.proposals().len() > MAX_PROPOSALS as usize {
             Err(Error::ExcessMaxProposals)?
         }
 
@@ -155,13 +158,19 @@ impl Transaction for TxNewProposals {
         // TODO: maybe add a chairperson to create new ballot
         has_voter_perm(&schema, self.pub_key())?;
 
-        println!("Create new ballot!");
-        let mut proposals = schema.proposals_mut();
-        for proposal in self.new_proposals() {
+        println!("Create new voting!");
+        let mut votings = schema.votings_mut();
+        let voting_id = votings.len();
+        let mut proposals = vec![];
+
+        for proposal in self.proposals() {
             let proposal = Proposal::new(proposal.subject(), 0);
-            println!("Add proposal: {:?}", proposal);
             proposals.push(proposal);
         }
+
+        let new_voting = Voting::new(voting_id, proposals, vec![]);
+        votings.push(new_voting);
+
         Ok(())
     }
 }
@@ -173,35 +182,20 @@ impl Transaction for TxVoteProposal {
 
     fn execute(&self, view: &mut Fork) -> ExecutionResult {
         let mut schema = BallotSchema::new(view);
-        has_voter_perm(&schema, self.pub_key())?;
+        let voter = has_voter_perm(&schema, self.pub_key())?;
+        let voting = schema
+            .voting(self.voting_id())
+            .ok_or(Error::VotingNoneExists)?;
 
-        if schema.voted_voters().contains(self.pub_key()) {
+        if schema.has_voted(voting.id(), self.pub_key()) {
             Err(Error::VoterAlreadyVoted)?
         }
 
-        let voter_weight = {
-            let voter = schema.voter(self.pub_key()).unwrap();
-            voter.weight()
-        };
-
-        // Update proposal's vote count
-        {
-            let mut proposals = schema.proposals_mut();
-            let proposal = proposals.get(self.id().into());
-            if let Some(proposal) = proposal {
-                let updated =
-                    Proposal::new(proposal.subject(), proposal.vote_count() + voter_weight);
-                proposals.set(self.id().into(), updated);
-            } else {
-                Err(Error::ProposalNoneExists)?
-            }
-        }
-
-        // Mark voter as voted
-        {
-            let mut voted_voters = schema.voted_voters_mut();
-            voted_voters.insert(self.pub_key().to_owned());
-        }
+        let updated_voting = voting
+            .vote(self.proposal_id() as usize, self.pub_key(), voter.weight())
+            .ok_or(Error::ProposalNoneExists)?;
+        schema.votings_mut().set(self.voting_id(), updated_voting);
+        schema.mark_voted(self.voting_id(), self.pub_key());
 
         Ok(())
     }

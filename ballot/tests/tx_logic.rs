@@ -8,22 +8,22 @@ use exonum::{crypto::{self, PublicKey, SecretKey}, storage::{ListIndex, Snapshot
 use exonum_testkit::{TestKit, TestKitBuilder};
 
 use ballot::{constants::{INIT_WEIGHT, MAX_PROPOSALS},
-             models::{Chairperson, NewProposal, Proposal, Voter}, schema::BallotSchema,
+             models::{Chairperson, NewProposal, Voter, Voting}, schema::BallotSchema,
              service::BallotService,
              transactions::{TxANewChairperson, TxASetVoterActiveState, TxCreateVoter,
-                            TxNewProposals, TxVoteProposal}};
+                            TxNewVoting, TxVoteProposal}};
 use constants::*;
 
 #[macro_use]
 mod constants;
 
-macro_rules! assert_proposals {
+macro_rules! assert_votings {
     ($testkit:expr, $assert:expr) => {{
         let snapshot = $testkit.snapshot();
         let ballot = BallotSchema::new(&snapshot);
-        let proposals = ballot.proposals();
+        let votings = ballot.votings();
 
-        $assert(proposals);
+        $assert(votings);
     }};
 }
 
@@ -167,17 +167,26 @@ fn test_set_voter_without_chairperson_permission() {
 }
 
 #[test]
-fn test_new_proposals() {
+fn test_new_voting() {
     let mut testkit = init_testkit();
 
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
     let test_subjects: Vec<&str> = get_subjects!();
-    let tx_new_proposals = new_proposals_tx(&test_subjects, &alice_pubkey, &alice_key);
+    let tx_new_voting = new_voting_tx(&test_subjects, &alice_pubkey, &alice_key);
 
-    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_new_proposals]);
+    testkit.create_block_with_transactions(txvec![
+        tx_create_alice,
+        tx_new_voting.clone(),
+        tx_new_voting.clone()
+    ]);
 
-    assert_proposals!(testkit, |proposals: ListIndex<&Snapshot, Proposal>| {
-        for (idx, proposal) in proposals.iter().enumerate() {
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        assert_eq!(votings.len(), 2);
+        let voting = votings.last().unwrap();
+
+        assert_eq!(voting.id(), 1);
+        assert!(voting.voted_voters().is_empty());
+        for (idx, proposal) in voting.proposals().iter().enumerate() {
             assert_eq!(proposal.subject(), test_subjects[idx]);
             assert_eq!(proposal.vote_count(), 0);
         }
@@ -185,32 +194,32 @@ fn test_new_proposals() {
 }
 
 #[test]
-fn test_new_proposals_with_excess_max_proposals() {
+fn test_new_voting_with_excess_max_proposals() {
     let mut testkit = init_testkit();
 
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
 
     let test_proposals: Vec<String> = (1..MAX_PROPOSALS + 2).map(|n| n.to_string()).collect();
     let test_proposals: Vec<&str> = test_proposals.iter().map(|n| &n[..]).collect();
-    let tx_new_proposals = new_proposals_tx(&test_proposals, &alice_pubkey, &alice_key);
+    let tx_new_voting = new_voting_tx(&test_proposals, &alice_pubkey, &alice_key);
 
-    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_new_proposals]);
+    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_new_voting]);
 
-    assert_proposals!(testkit, |proposals: ListIndex<&Snapshot, Proposal>| {
-        assert!(proposals.is_empty());
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        assert!(votings.is_empty());
     });
 }
 
 #[test]
-fn test_new_proposals_without_voter_permission() {
+fn test_new_voting_without_voter_permission() {
     let mut testkit = init_testkit();
     let (alice_pubkey, alice_key) = crypto::gen_keypair();
 
-    let tx = new_proposals_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
+    let tx = new_voting_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
     testkit.create_block_with_transaction(tx);
 
-    assert_proposals!(testkit, |proposals: ListIndex<&Snapshot, Proposal>| {
-        assert!(proposals.is_empty());
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        assert!(votings.is_empty());
     });
 }
 
@@ -219,20 +228,28 @@ fn test_vote_proposal() {
     let mut testkit = init_testkit();
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
     let (tx_create_bob, bob_pubkey, bob_key) = create_voter_tx(BOB_NAME);
-    let tx_new_proposals = new_proposals_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
-    let tx_bob_vote_first_proposal = TxVoteProposal::new(&bob_pubkey, 0, &bob_key);
+    let tx_new_voting = new_voting_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
+    let expect_voting_id = 0;
+    let expect_proposal_id = 1;
+    let tx_bob_vote_second_proposal =
+        TxVoteProposal::new(&bob_pubkey, expect_voting_id, expect_proposal_id, &bob_key);
 
     testkit.create_block_with_transactions(txvec![
         tx_create_alice,
         tx_create_bob,
-        tx_new_proposals,
-        tx_bob_vote_first_proposal
+        tx_new_voting,
+        tx_bob_vote_second_proposal
     ]);
 
     let bob = get_voter(&testkit, &bob_pubkey);
 
-    let first_proposal = get_proposal(&testkit, 0);
-    assert_eq!(first_proposal.vote_count(), bob.weight());
+    assert!(has_voted(&testkit, expect_voting_id, &bob_pubkey));
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        let voting = votings.get(expect_voting_id).unwrap();
+        let proposal = voting.get_proposal(expect_proposal_id as usize).unwrap();
+        assert!(voting.has_voted(&bob_pubkey));
+        assert_eq!(proposal.vote_count(), bob.weight());
+    });
 }
 
 #[test]
@@ -240,36 +257,84 @@ fn test_vote_proposal_without_vote_permission() {
     let mut testkit = init_testkit();
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
     let (_, bob_pubkey, bob_key) = create_voter_tx(BOB_NAME);
-    let tx_new_proposals = new_proposals_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
-    let tx_bob_vote_first_proposal = TxVoteProposal::new(&bob_pubkey, 0, &bob_key);
+    let tx_new_voting = new_voting_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
+    let expect_voting_id = 0;
+    let expect_proposal_id = 1;
+    let tx_bob_vote_second_proposal =
+        TxVoteProposal::new(&bob_pubkey, expect_voting_id, expect_proposal_id, &bob_key);
 
     testkit.create_block_with_transactions(txvec![
         tx_create_alice,
-        tx_new_proposals,
-        tx_bob_vote_first_proposal
+        tx_new_voting,
+        tx_bob_vote_second_proposal
     ]);
 
-    assert_eq!(get_proposal(&testkit, 0).vote_count(), 0);
+    assert!(!has_voted(&testkit, expect_voting_id, &bob_pubkey));
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        let voting = votings.get(expect_voting_id).unwrap();
+        let proposal = voting.get_proposal(expect_proposal_id as usize).unwrap();
+        assert_eq!(proposal.vote_count(), 0);
+        assert!(!voting.has_voted(&bob_pubkey));
+    });
 }
 
 #[test]
 fn test_vote_proposal_twice() {
     let mut testkit = init_testkit();
     let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
-    let tx_new_proposals = new_proposals_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
-    let tx_alice_vote_first_proposal = TxVoteProposal::new(&alice_pubkey, 0, &alice_key);
-    let tx_alice_vote_second_proposal = TxVoteProposal::new(&alice_pubkey, 1, &alice_key);
+    let tx_new_voting = new_voting_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
+    let expect_voting_id = 0;
+    let expect_proposal_id = 0;
+    let tx_alice_vote_first_proposal = TxVoteProposal::new(
+        &alice_pubkey,
+        expect_voting_id,
+        expect_proposal_id,
+        &alice_key,
+    );
 
     testkit.create_block_with_transactions(txvec![
         tx_create_alice,
-        tx_new_proposals,
+        tx_new_voting,
         tx_alice_vote_first_proposal.clone(),
         tx_alice_vote_first_proposal.clone(),
-        tx_alice_vote_second_proposal
     ]);
 
     let alice = get_voter(&testkit, &alice_pubkey);
-    assert_eq!(get_proposal(&testkit, 0).vote_count(), alice.weight());
+
+    assert!(has_voted(&testkit, expect_voting_id, &alice_pubkey));
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        let voting = votings.get(expect_voting_id).unwrap();
+        let proposal = voting.get_proposal(expect_proposal_id as usize).unwrap();
+        assert_eq!(proposal.vote_count(), alice.weight());
+        assert!(voting.has_voted(&alice_pubkey));
+    });
+}
+
+#[test]
+fn test_vote_none_exist_proposal() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let tx_new_voting = new_voting_tx(&(get_subjects!()), &alice_pubkey, &alice_key);
+    let expect_voting_id = 0;
+    let expect_proposal_id = get_subjects!().len() + 1;
+    let tx_alice_vote_none_exist_proposal = TxVoteProposal::new(
+        &alice_pubkey,
+        expect_voting_id,
+        expect_proposal_id as u16,
+        &alice_key,
+    );
+
+    testkit.create_block_with_transactions(txvec![
+        tx_create_alice,
+        tx_new_voting,
+        tx_alice_vote_none_exist_proposal
+    ]);
+
+    assert!(!has_voted(&testkit, expect_voting_id, &alice_pubkey));
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        let voting = votings.get(expect_voting_id).unwrap();
+        assert!(!voting.has_voted(&alice_pubkey));
+    });
 }
 
 fn init_testkit() -> TestKit {
@@ -283,18 +348,21 @@ fn create_voter_tx(name: &str) -> (TxCreateVoter, PublicKey, SecretKey) {
     (TxCreateVoter::new(&pubkey, name, &key), pubkey, key)
 }
 
-fn new_proposals_tx(subjects: &Vec<&str>, pubkey: &PublicKey, key: &SecretKey) -> TxNewProposals {
+fn new_voting_tx(subjects: &Vec<&str>, pubkey: &PublicKey, key: &SecretKey) -> TxNewVoting {
     let mut proposals: Vec<NewProposal> = vec![];
     for subject in subjects {
         proposals.push(NewProposal::new(subject));
     }
 
-    TxNewProposals::new(pubkey, proposals, key)
+    TxNewVoting::new(pubkey, proposals, key)
+}
+
+fn get_schema(testkit: &TestKit) -> BallotSchema<Box<Snapshot>> {
+    BallotSchema::new(testkit.snapshot())
 }
 
 fn try_get_voter(testkit: &TestKit, pubkey: &PublicKey) -> Option<Voter> {
-    let snapshot = testkit.snapshot();
-    BallotSchema::new(&snapshot).voter(pubkey)
+    get_schema(testkit).voter(pubkey)
 }
 
 fn get_voter(testkit: &TestKit, pubkey: &PublicKey) -> Voter {
@@ -302,17 +370,11 @@ fn get_voter(testkit: &TestKit, pubkey: &PublicKey) -> Voter {
 }
 
 fn get_chairperson(testkit: &TestKit) -> Chairperson {
-    let snapshot = testkit.snapshot();
-    BallotSchema::new(&snapshot)
+    get_schema(testkit)
         .chairperson()
         .expect("No chairperson persisted")
 }
 
-fn try_get_proposal(testkit: &TestKit, id: u64) -> Option<Proposal> {
-    let snapshot = testkit.snapshot();
-    BallotSchema::new(&snapshot).proposal(id)
-}
-
-fn get_proposal(testkit: &TestKit, id: u64) -> Proposal {
-    try_get_proposal(testkit, id).expect("No proposal persisted")
+fn has_voted(testkit: &TestKit, id: u64, pub_key: &PublicKey) -> bool {
+    get_schema(testkit).has_voted(id, pub_key)
 }

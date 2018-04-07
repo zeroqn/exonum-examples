@@ -1,12 +1,12 @@
 use exonum::{api::{Api, ApiError}, blockchain::{Blockchain, Transaction},
              crypto::{Hash, PublicKey}, encoding::serialize::FromHex,
-             node::{ApiSender, TransactionSend}};
+             node::{ApiSender, TransactionSend}, storage::Snapshot};
 use iron::{headers::ContentType, modifiers::Header, prelude::*, status::Status};
 use router::Router;
 use serde_json;
 use bodyparser;
 
-use models::{Proposal, Voter};
+use models::{Voter, Voting};
 use schema::BallotSchema;
 use transactions::BallotTransactions;
 
@@ -65,18 +65,17 @@ impl BallotApi {
         self.ok_response(&serde_json::to_value(&voters).unwrap())
     }
 
-    fn get_proposals(&self, _: &mut Request) -> IronResult<Response> {
-        let snapshot = self.blockchain.snapshot();
-        let schema = BallotSchema::new(snapshot);
-        let idx = schema.proposals();
-        let proposals: Vec<Proposal> = idx.iter().collect();
+    fn get_votings(&self, _: &mut Request) -> IronResult<Response> {
+        let schema = self.get_schema();
+        let idx = schema.votings();
+        let votings: Vec<Voting> = idx.iter().collect();
 
-        self.ok_response(&serde_json::to_value(&proposals).unwrap())
+        self.ok_response(&serde_json::to_value(&votings).unwrap())
     }
 
-    fn get_proposal(&self, req: &mut Request) -> IronResult<Response> {
+    fn get_voting(&self, req: &mut Request) -> IronResult<Response> {
         let path = req.url.path();
-        let proposal_id = path.last().unwrap().parse::<u64>().map_err(|e| {
+        let voting_id = path.last().unwrap().parse::<u64>().map_err(|e| {
             IronError::new(
                 e,
                 (
@@ -87,16 +86,11 @@ impl BallotApi {
             )
         })?;
 
-        let proposal = {
-            let snapshot = self.blockchain.snapshot();
-            let schema = BallotSchema::new(snapshot);
-            schema.proposal(proposal_id)
-        };
-
-        if let Some(proposal) = proposal {
-            self.ok_response(&serde_json::to_value(proposal).unwrap())
+        let schema = self.get_schema();
+        if let Some(voting) = schema.voting(voting_id) {
+            self.ok_response(&serde_json::to_value(voting).unwrap())
         } else {
-            self.not_found_response(&serde_json::to_value("Proposal not found").unwrap())
+            self.not_found_response(&serde_json::to_value("Voting not found").unwrap())
         }
     }
 
@@ -113,6 +107,11 @@ impl BallotApi {
             Err(e) => Err(ApiError::BadRequest(e.to_string()))?,
         }
     }
+
+    fn get_schema(&self) -> BallotSchema<Box<Snapshot>> {
+        let snapshot = self.blockchain.snapshot();
+        BallotSchema::new(snapshot)
+    }
 }
 
 impl Api for BallotApi {
@@ -127,22 +126,22 @@ impl Api for BallotApi {
             move |req: &mut Request| api.get_voter(req)
         };
 
-        let post_new_proposals = post_handler!(self);
-        let get_proposals = {
+        let post_new_votings = post_handler!(self);
+        let get_votings = {
             let api = self.clone();
-            move |req: &mut Request| api.get_proposals(req)
+            move |req: &mut Request| api.get_votings(req)
         };
-        let get_proposal = {
+        let get_voting = {
             let api = self.clone();
-            move |req: &mut Request| api.get_proposal(req)
+            move |req: &mut Request| api.get_voting(req)
         };
 
         router.post("/v1/voters", post_create_voter, "post_create_voter");
         router.get("/v1/voters", get_voters, "get_voters");
         router.get("/v1/voter/:pub_key", get_voter, "get_voter");
 
-        router.post("/v1/proposals", post_new_proposals, "post_new_proposals");
-        router.get("/v1/proposals", get_proposals, "get_proposals");
-        router.get("/v1/proposals/:id", get_proposal, "get_proposal");
+        router.post("/v1/votings", post_new_votings, "post_new_votings");
+        router.get("/v1/votings", get_votings, "get_votings");
+        router.get("/v1/votings/:id", get_voting, "get_voting");
     }
 }

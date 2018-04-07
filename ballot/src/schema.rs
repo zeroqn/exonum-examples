@@ -1,6 +1,6 @@
 use exonum::{crypto::PublicKey, storage::{Fork, KeySetIndex, ListIndex, MapIndex, Snapshot}};
 
-use models::{Chairperson, Proposal, Voter};
+use models::{Chairperson, Voter, Voting};
 
 pub struct BallotSchema<T> {
     view: T,
@@ -25,16 +25,20 @@ impl<T: AsRef<Snapshot>> BallotSchema<T> {
         chairperson.last()
     }
 
-    pub fn proposals(&self) -> ListIndex<&Snapshot, Proposal> {
-        ListIndex::new("ballot.proposals", self.view.as_ref())
+    pub fn votings(&self) -> ListIndex<&Snapshot, Voting> {
+        ListIndex::new("ballot.votings", self.view.as_ref())
     }
 
-    pub fn proposal(&self, proposal_id: u64) -> Option<Proposal> {
-        self.proposals().get(proposal_id)
+    pub fn voting(&self, voting_id: u64) -> Option<Voting> {
+        self.votings().get(voting_id)
     }
 
-    pub fn voted_voters(&self) -> KeySetIndex<&Snapshot, PublicKey> {
-        KeySetIndex::new("ballot.votedvoters", self.view.as_ref())
+    pub fn has_voted(&self, voting_id: u64, voter_pubkey: &PublicKey) -> bool {
+        let voted_voters: KeySetIndex<&Snapshot, PublicKey> = KeySetIndex::new(
+            "ballot.hasvoted.".to_owned() + &voting_id.to_string(),
+            self.view.as_ref(),
+        );
+        voted_voters.contains(voter_pubkey)
     }
 }
 
@@ -43,18 +47,22 @@ impl<'a> BallotSchema<&'a mut Fork> {
         MapIndex::new("ballot.voters", &mut self.view)
     }
 
-    pub fn voted_voters_mut(&mut self) -> KeySetIndex<&mut Fork, PublicKey> {
-        KeySetIndex::new("ballot.votedvoters", &mut self.view)
-    }
-
-    pub fn proposals_mut(&mut self) -> ListIndex<&mut Fork, Proposal> {
-        ListIndex::new("ballot.proposals", &mut self.view)
-    }
-
     pub fn set_chairperson(&mut self, new_one: Chairperson) {
         let mut chairperson: ListIndex<&mut Fork, Chairperson> =
             ListIndex::new("ballot.chairperson", &mut self.view);
         chairperson.clear();
         chairperson.push(new_one);
+    }
+
+    pub fn votings_mut(&mut self) -> ListIndex<&mut Fork, Voting> {
+        ListIndex::new("ballot.votings", &mut self.view)
+    }
+
+    pub fn mark_voted(&mut self, voting_id: u64, voter_pubkey: &PublicKey) {
+        let mut voted_voters: KeySetIndex<&mut Fork, PublicKey> = KeySetIndex::new(
+            "ballot.hasvoted.".to_owned() + &voting_id.to_string(),
+            &mut self.view,
+        );
+        voted_voters.insert(voter_pubkey.to_owned());
     }
 }
