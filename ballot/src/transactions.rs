@@ -28,6 +28,7 @@ transactions!{
         struct TxNewVoting {
             pub_key: &PublicKey,
             proposals: Vec<NewProposal>,
+            duration_in_secs: u64,
         }
 
         struct TxVoteProposal {
@@ -59,6 +60,8 @@ pub enum Error {
     VoterInactive = 7,
     #[fail(display = "Voting none exists")]
     VotingNoneExists = 8,
+    #[fail(display = "Voting done")]
+    VotingDone = 9,
 }
 
 impl From<Error> for ExecutionError {
@@ -168,7 +171,7 @@ impl Transaction for TxNewVoting {
             proposals.push(proposal);
         }
 
-        let new_voting = Voting::new(voting_id, proposals, vec![]);
+        let new_voting = Voting::new_with_limit(voting_id, proposals, self.duration_in_secs());
         votings.push(new_voting);
 
         Ok(())
@@ -189,6 +192,10 @@ impl Transaction for TxVoteProposal {
 
         if schema.has_voted(voting.id(), self.pub_key()) {
             Err(Error::VoterAlreadyVoted)?
+        }
+
+        if voting.has_done() {
+            Err(Error::VotingDone)?
         }
 
         let updated_voting = voting

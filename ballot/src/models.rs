@@ -1,3 +1,6 @@
+use std::time::{Duration as StdDuration, SystemTime};
+use std::ops::Add;
+
 use exonum::crypto::PublicKey;
 
 encoding_struct! {
@@ -35,15 +38,55 @@ encoding_struct!  {
     }
 }
 
+encoding_struct! {
+    struct Duration {
+        seconds: u64,
+    }
+}
+
+encoding_struct!{
+    struct TimeLimit {
+        deadline: SystemTime,
+        start_time: SystemTime,
+        duration: Duration,
+    }
+}
+
 encoding_struct!{
     struct Voting {
         id: u64,
         proposals: Vec<Proposal>,
         voted_voters: Vec<VoterPubKey>,
+
+        time_limit: TimeLimit,
+    }
+}
+
+impl TimeLimit {
+    pub fn new_limit(duration: u64) -> Self {
+        let start_time = SystemTime::now();
+        TimeLimit::new(
+            start_time.clone().add(StdDuration::new(duration, 0)),
+            start_time,
+            Duration::new(duration),
+        )
+    }
+
+    pub fn within_limit(&self) -> bool {
+        SystemTime::now() <= self.deadline()
     }
 }
 
 impl Voting {
+    pub fn new_with_limit(id: u64, proposals: Vec<Proposal>, duration_in_secs: u64) -> Self {
+        Voting::new(
+            id,
+            proposals,
+            vec![],
+            TimeLimit::new_limit(duration_in_secs),
+        )
+    }
+
     pub fn vote(
         self,
         proposal_id: usize,
@@ -60,7 +103,16 @@ impl Voting {
         proposals[proposal_id] = updated_proposal;
         voted_voters.push(VoterPubKey::new(voter_pubkey));
 
-        Some(Voting::new(self.id(), proposals, voted_voters))
+        Some(Voting::new(
+            self.id(),
+            proposals,
+            voted_voters,
+            self.time_limit(),
+        ))
+    }
+
+    pub fn has_done(&self) -> bool {
+        !self.time_limit().within_limit()
     }
 
     pub fn has_voted(&self, voter_pubkey: &PublicKey) -> bool {

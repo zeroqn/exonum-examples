@@ -4,6 +4,9 @@ extern crate exonum;
 extern crate exonum_testkit;
 extern crate rand;
 
+use std::thread::sleep;
+use std::time::Duration;
+
 use exonum::{crypto::{self, PublicKey, SecretKey}, storage::{ListIndex, Snapshot}};
 use exonum_testkit::{TestKit, TestKitBuilder};
 
@@ -337,6 +340,35 @@ fn test_vote_none_exist_proposal() {
     });
 }
 
+#[test]
+fn test_vote_already_done_voting() {
+    let mut testkit = init_testkit();
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+    let duration = 3;
+    let expect_voting_id = 0;
+    let expect_proposal_id = 0;
+    let tx_new_voting =
+        new_voting_tx_with_duration(&(get_subjects!()), &alice_pubkey, duration, &alice_key);
+    let tx_alice_vote_first_proposal = TxVoteProposal::new(
+        &alice_pubkey,
+        expect_voting_id,
+        expect_proposal_id as u16,
+        &alice_key,
+    );
+
+    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_new_voting,]);
+    sleep(Duration::new(duration + 2, 0));
+    testkit.create_block_with_transaction(tx_alice_vote_first_proposal);
+
+    assert!(!has_voted(&testkit, expect_voting_id, &alice_pubkey));
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        let voting = votings.get(expect_voting_id).unwrap();
+        let proposal = voting.get_proposal(expect_proposal_id as usize).unwrap();
+        assert_eq!(proposal.vote_count(), 0);
+        assert!(!voting.has_voted(&alice_pubkey));
+    });
+}
+
 fn init_testkit() -> TestKit {
     TestKitBuilder::validator()
         .with_service(BallotService)
@@ -349,12 +381,22 @@ fn create_voter_tx(name: &str) -> (TxCreateVoter, PublicKey, SecretKey) {
 }
 
 fn new_voting_tx(subjects: &Vec<&str>, pubkey: &PublicKey, key: &SecretKey) -> TxNewVoting {
+    let duration = 1 * 60 * 60;
+    new_voting_tx_with_duration(subjects, pubkey, duration, key)
+}
+
+fn new_voting_tx_with_duration(
+    subjects: &Vec<&str>,
+    pubkey: &PublicKey,
+    duration: u64,
+    key: &SecretKey,
+) -> TxNewVoting {
     let mut proposals: Vec<NewProposal> = vec![];
     for subject in subjects {
         proposals.push(NewProposal::new(subject));
     }
 
-    TxNewVoting::new(pubkey, proposals, key)
+    TxNewVoting::new(pubkey, proposals, duration, key)
 }
 
 fn get_schema(testkit: &TestKit) -> BallotSchema<Box<Snapshot>> {
