@@ -6,7 +6,7 @@ use router::Router;
 use serde_json;
 use bodyparser;
 
-use models::{Voter, Voting};
+use models::{Proposal, Voter, Voting};
 use schema::BallotSchema;
 use transactions::BallotTransactions;
 
@@ -88,9 +88,41 @@ impl BallotApi {
 
         let schema = self.get_schema();
         if let Some(voting) = schema.voting(voting_id) {
-            self.ok_response(&serde_json::to_value(voting).unwrap())
+            self.ok_response(&serde_json::to_value(&voting).unwrap())
         } else {
             self.not_found_response(&serde_json::to_value("Voting not found").unwrap())
+        }
+    }
+
+    fn get_winning_proposal(&self, req: &mut Request) -> IronResult<Response> {
+        let path = req.url.path();
+        let voting_id = path.last().unwrap().parse::<u64>().map_err(|e| {
+            IronError::new(
+                e,
+                (
+                    Status::BadRequest,
+                    Header(ContentType::json()),
+                    "\"Invalid request param: `proposal id`\"",
+                ),
+            )
+        })?;
+
+        let schema = self.get_schema();
+        match schema.voting(voting_id) {
+            Some(ref voting) if voting.has_done() => {
+                let proposals = voting.proposals();
+                let mut winning_proposal = proposals.last().unwrap();
+
+                for proposal in proposals.iter() {
+                    if proposal.vote_count() > winning_proposal.vote_count() {
+                        winning_proposal = proposal;
+                    }
+                }
+
+                self.ok_response(&serde_json::to_value(&winning_proposal).unwrap())
+            }
+            Some(_) => self.ok_response(&serde_json::to_value("Voting not done yet").unwrap()),
+            None => self.not_found_response(&serde_json::to_value("Voting not found").unwrap()),
         }
     }
 
@@ -135,6 +167,10 @@ impl Api for BallotApi {
             let api = self.clone();
             move |req: &mut Request| api.get_voting(req)
         };
+        let get_winning_proposal = {
+            let api = self.clone();
+            move |req: &mut Request| api.get_winning_proposal(req)
+        };
 
         router.post("/v1/voters", post_create_voter, "post_create_voter");
         router.get("/v1/voters", get_voters, "get_voters");
@@ -143,5 +179,10 @@ impl Api for BallotApi {
         router.post("/v1/votings", post_new_votings, "post_new_votings");
         router.get("/v1/votings", get_votings, "get_votings");
         router.get("/v1/votings/:id", get_voting, "get_voting");
+        router.get(
+            "/v1/votings/:id/winner",
+            get_winning_proposal,
+            "get_winning_proposal",
+        );
     }
 }
