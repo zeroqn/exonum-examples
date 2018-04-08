@@ -6,14 +6,14 @@ use router::Router;
 use serde_json;
 use bodyparser;
 
-use models::{Proposal, Voter, Voting};
+use models::{Voter, Voting};
 use schema::BallotSchema;
 use transactions::BallotTransactions;
 
-macro_rules! post_handler {
-    ($api: expr) => {{
+macro_rules! handler {
+    ($api: expr, $method: expr) => {{
         let api = $api.clone();
-        move |req: &mut Request| api.post_transaction(req)
+        move |req: &mut Request| api.invoke($method, req)
     }}
 }
 
@@ -26,6 +26,15 @@ pub struct BallotApi {
 #[derive(Serialize, Deserialize)]
 pub struct TransactionResponse {
     pub tx_hash: Hash,
+}
+
+enum Method {
+    Post,
+    GetVoters,
+    GetVoter,
+    GetVotings,
+    GetVoting,
+    GetWinningProposal,
 }
 
 impl BallotApi {
@@ -140,6 +149,17 @@ impl BallotApi {
         }
     }
 
+    fn invoke(&self, method: Method, req: &mut Request) -> IronResult<Response> {
+        match method {
+            Method::Post => self.post_transaction(req),
+            Method::GetVoter => self.get_voter(req),
+            Method::GetVoters => self.get_voters(req),
+            Method::GetVotings => self.get_votings(req),
+            Method::GetVoting => self.get_voting(req),
+            Method::GetWinningProposal => self.get_winning_proposal(req),
+        }
+    }
+
     fn get_schema(&self) -> BallotSchema<Box<Snapshot>> {
         let snapshot = self.blockchain.snapshot();
         BallotSchema::new(snapshot)
@@ -148,40 +168,40 @@ impl BallotApi {
 
 impl Api for BallotApi {
     fn wire(&self, router: &mut Router) {
-        let post_create_voter = post_handler!(self);
-        let get_voters = {
-            let api = self.clone();
-            move |req: &mut Request| api.get_voters(req)
-        };
-        let get_voter = {
-            let api = self.clone();
-            move |req: &mut Request| api.get_voter(req)
-        };
+        router.post(
+            "/v1/voters",
+            handler!(self, Method::Post),
+            "post_create_voter",
+        );
+        router.get(
+            "/v1/voters",
+            handler!(self, Method::GetVoters),
+            "get_voters",
+        );
+        router.get(
+            "/v1/voter/:pub_key",
+            handler!(self, Method::GetVoter),
+            "get_voter",
+        );
 
-        let post_new_votings = post_handler!(self);
-        let get_votings = {
-            let api = self.clone();
-            move |req: &mut Request| api.get_votings(req)
-        };
-        let get_voting = {
-            let api = self.clone();
-            move |req: &mut Request| api.get_voting(req)
-        };
-        let get_winning_proposal = {
-            let api = self.clone();
-            move |req: &mut Request| api.get_winning_proposal(req)
-        };
-
-        router.post("/v1/voters", post_create_voter, "post_create_voter");
-        router.get("/v1/voters", get_voters, "get_voters");
-        router.get("/v1/voter/:pub_key", get_voter, "get_voter");
-
-        router.post("/v1/votings", post_new_votings, "post_new_votings");
-        router.get("/v1/votings", get_votings, "get_votings");
-        router.get("/v1/votings/:id", get_voting, "get_voting");
+        router.post(
+            "/v1/votings",
+            handler!(self, Method::Post),
+            "post_new_votings",
+        );
+        router.get(
+            "/v1/votings",
+            handler!(self, Method::GetVotings),
+            "get_votings",
+        );
+        router.get(
+            "/v1/votings/:id",
+            handler!(self, Method::GetVoting),
+            "get_voting",
+        );
         router.get(
             "/v1/votings/:id/winner",
-            get_winning_proposal,
+            handler!(self, Method::GetWinningProposal),
             "get_winning_proposal",
         );
     }
