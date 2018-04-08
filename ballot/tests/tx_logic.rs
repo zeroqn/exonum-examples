@@ -214,6 +214,21 @@ fn test_new_voting_with_excess_max_proposals() {
 }
 
 #[test]
+fn test_new_voting_with_excess_min_proposals() {
+    let mut testkit = init_testkit();
+
+    let (tx_create_alice, alice_pubkey, alice_key) = create_voter_tx(ALICE_NAME);
+
+    let tx_new_voting = new_voting_tx(&vec!["1"], &alice_pubkey, &alice_key);
+
+    testkit.create_block_with_transactions(txvec![tx_create_alice, tx_new_voting]);
+
+    assert_votings!(testkit, |votings: ListIndex<&Snapshot, Voting>| {
+        assert!(votings.is_empty());
+    });
+}
+
+#[test]
 fn test_new_voting_without_voter_permission() {
     let mut testkit = init_testkit();
     let (alice_pubkey, alice_key) = crypto::gen_keypair();

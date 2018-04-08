@@ -1,7 +1,7 @@
 use exonum::{blockchain::{ExecutionError, ExecutionResult, Transaction}, crypto::PublicKey,
              messages::Message, storage::Fork};
 
-use constants::{INIT_WEIGHT, MAX_PROPOSALS, SERVICE_ID};
+use constants::{INIT_WEIGHT, MAX_PROPOSALS, MIN_PROPOSALS, SERVICE_ID};
 use models::{Chairperson, NewProposal, Proposal, Voter, Voting};
 use schema::BallotSchema;
 
@@ -62,6 +62,8 @@ pub enum Error {
     VotingNoneExists = 8,
     #[fail(display = "Voting done")]
     VotingDone = 9,
+    #[fail(display = "Lower min proposals")]
+    LowerMinProposals = 10,
 }
 
 impl From<Error> for ExecutionError {
@@ -155,6 +157,10 @@ impl Transaction for TxNewVoting {
     fn execute(&self, view: &mut Fork) -> ExecutionResult {
         if self.proposals().len() > MAX_PROPOSALS as usize {
             Err(Error::ExcessMaxProposals)?
+        }
+
+        if self.proposals().len() < MIN_PROPOSALS as usize {
+            Err(Error::LowerMinProposals)?
         }
 
         let mut schema = BallotSchema::new(view);
