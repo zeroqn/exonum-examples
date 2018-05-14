@@ -16,15 +16,16 @@ extern crate serde_json;
 #[macro_use]
 extern crate exonum_testkit;
 
-const SERVICE_ID: u16 = 1;
-const SERVICE_NAME: &'static str = "ballot";
-
-pub mod schema;
-pub mod transactions;
-pub mod error;
-pub mod api;
+mod schema;
+mod transactions;
+mod error;
+mod api;
 #[cfg(test)]
 mod tests;
+
+pub use error::ErrorCode;
+pub use schema::{BallotData, ProposalList, Schema};
+pub use transactions::{Ballot, Transactions as BallotTransactions, Vote};
 
 use exonum::encoding;
 use exonum::api::Api;
@@ -35,9 +36,10 @@ use exonum::storage::Snapshot;
 use iron::Handler;
 use router::Router;
 
-use schema::Schema;
-use transactions::Transactions as BallotTransactions;
 use api as BallotApi;
+
+pub const SERVICE_ID: u16 = 1;
+pub const SERVICE_NAME: &'static str = "ballot";
 
 pub struct BallotService;
 
