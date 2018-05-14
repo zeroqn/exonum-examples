@@ -1,17 +1,11 @@
-extern crate ballot;
-extern crate exonum;
-#[macro_use]
-extern crate exonum_testkit;
-extern crate rand;
-
 use exonum::crypto::{self, hash, CryptoHash, Hash};
 use exonum::storage::StorageValue;
 use exonum_testkit::{TestKit, TestKitBuilder, TestNode};
 
-use ballot::BallotService;
-use ballot::schema::{ProposalList, Schema as BallotSchema};
-use ballot::transactions::{Ballot, Vote};
-use ballot::error::ErrorCode;
+use BallotService;
+use error::ErrorCode;
+use schema::{ProposalList, Schema as BallotSchema};
+use transactions::{Ballot, Vote};
 
 macro_rules! create_test_ballot {
     ($testkit: expr) => {{

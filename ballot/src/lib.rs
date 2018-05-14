@@ -12,6 +12,10 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 
+#[cfg(test)]
+#[macro_use]
+extern crate exonum_testkit;
+
 const SERVICE_ID: u16 = 1;
 const SERVICE_NAME: &'static str = "ballot";
 
@@ -19,6 +23,8 @@ pub mod schema;
 pub mod transactions;
 pub mod error;
 pub mod api;
+#[cfg(test)]
+mod tests;
 
 use exonum::encoding;
 use exonum::api::Api;
