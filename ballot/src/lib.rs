@@ -62,6 +62,13 @@ impl Service for BallotService {
         schema.state_hash()
     }
 
+    fn public_api_handler(&self, ctx: &ApiContext) -> Option<Box<Handler>> {
+        let mut router = Router::new();
+        let api = api::PublicApi::new(ctx);
+        api.wire(&mut router);
+        Some(Box::new(router))
+    }
+
     fn private_api_handler(&self, ctx: &ApiContext) -> Option<Box<Handler>> {
         let mut router = Router::new();
         let api = BallotApi::PrivateApi::new(ctx);

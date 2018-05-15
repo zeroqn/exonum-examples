@@ -31,14 +31,14 @@ lazy_static! {
 
 /// json example:
 /// {"proposals": [{"id": 1, subject: "lina", "description": "example"}]}
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct Proposal {
     id: u64,
     subject: String,
     description: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ProposalList {
     id: u64,
     proposals: Vec<Proposal>,

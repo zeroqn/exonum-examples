@@ -10,8 +10,19 @@ use router::Router;
 use serde_json;
 use bodyparser;
 
-use schema::ProposalList;
+use schema::{BallotData, ProposalList, Schema};
 use transactions::{Ballot, Vote};
+
+pub type VotesInfo = Option<Vec<Option<Vote>>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BallotHashInfo {
+    pub ballot: Option<BallotData>,
+    pub hash: Option<Hash>,
+    pub proposals: Option<ProposalList>,
+    pub proposals_hash: Hash,
+    pub votes: VotesInfo,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BallotResponse {
@@ -46,6 +57,90 @@ impl PublicApi {
         PublicApi {
             blockchain: context.blockchain().clone(),
         }
+    }
+
+    fn ballots(&self, offset: u64, limit: usize) -> Vec<BallotHashInfo> {
+        let schema = Schema::new(self.blockchain.snapshot());
+        let proposals_hashs = schema.proposals_hash_by_ordinal();
+        let ballots = proposals_hashs
+            .iter_from(offset)
+            .take(limit)
+            .map(|hash| self.ballot_with_proofs(&hash))
+            .collect();
+        ballots
+    }
+
+    fn ballot_with_proofs(&self, proposals_hash: &Hash) -> BallotHashInfo {
+        let schema = Schema::new(self.blockchain.snapshot());
+        if let Some(ballot_data) = schema.ballot_data_by_proposals_hash().get(proposals_hash) {
+            let hash = Some(ballot_data.hash());
+            let tx_ballot = ballot_data.tx_ballot();
+            let proposals_str = tx_ballot.proposals();
+            let proposals = Some(ProposalList::try_deserialize(proposals_str.as_bytes()).unwrap());
+            let votes = Some(schema.votes(proposals_hash));
+            BallotHashInfo {
+                ballot: Some(ballot_data),
+                hash,
+                proposals,
+                proposals_hash: *proposals_hash,
+                votes,
+            }
+        } else {
+            BallotHashInfo {
+                ballot: None,
+                hash: None,
+                proposals: None,
+                proposals_hash: *proposals_hash,
+                votes: None,
+            }
+        }
+    }
+
+    fn votes_for_ballot(&self, proposals_hash: &Hash) -> VotesInfo {
+        let schema = Schema::new(self.blockchain.snapshot());
+        if schema
+            .ballot_data_by_proposals_hash()
+            .contains(proposals_hash)
+        {
+            Some(schema.votes(proposals_hash))
+        } else {
+            None
+        }
+    }
+
+    fn handle_range_ballots(self, router: &mut Router) {
+        let range_ballots = move |req: &mut Request| -> IronResult<Response> {
+            let limit = self.required_param::<usize>(req, "limit")?;
+            let offset = self.required_param::<u64>(req, "offset")?;
+            let ballots = self.ballots(offset, limit);
+            self.ok_response(&serde_json::to_value(ballots).unwrap())
+        };
+
+        router.get("/v1/ballots", range_ballots, "range_ballots");
+    }
+
+    fn handle_ballot_by_hash(self, router: &mut Router) {
+        let ballot_by_hash = move |req: &mut Request| -> IronResult<Response> {
+            let proposals_hash = self.url_fragment::<Hash>(req, "hash")?;
+            let ballot_hash_info = self.ballot_with_proofs(&proposals_hash);
+            self.ok_response(&serde_json::to_value(ballot_hash_info).unwrap())
+        };
+
+        router.get("/v1/ballots/:hash", ballot_by_hash, "ballot_by_hash");
+    }
+
+    fn handle_votes_for_ballot(self, router: &mut Router) {
+        let votes_for_ballot = move |req: &mut Request| -> IronResult<Response> {
+            let proposals_hash = self.url_fragment::<Hash>(req, "hash")?;
+            let votes = self.votes_for_ballot(&proposals_hash);
+            self.ok_response(&serde_json::to_value(votes).unwrap())
+        };
+
+        router.get(
+            "/v1/ballots/:hash/votes",
+            votes_for_ballot,
+            "votes_for_ballot",
+        );
     }
 }
 
@@ -109,7 +204,15 @@ impl PrivateApi {
             self.ok_response(&serde_json::to_value(response).unwrap())
         };
 
-        router.post("/v1/ballot/:hash/postvote", post_vote, "post_vote");
+        router.post("/v1/ballots/:hash/postvote", post_vote, "post_vote");
+    }
+}
+
+impl ExonumApi for PublicApi {
+    fn wire(&self, router: &mut Router) {
+        self.clone().handle_range_ballots(router);
+        self.clone().handle_ballot_by_hash(router);
+        self.clone().handle_votes_for_ballot(router);
     }
 }
 
