@@ -41,6 +41,7 @@ struct Proposal {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ProposalList {
     id: u64,
+    deadline: u64,
     proposals: Vec<Proposal>,
 }
 
@@ -73,6 +74,10 @@ impl ProposalList {
             }
         }
         false
+    }
+
+    pub fn deadline(&self) -> u64 {
+        self.deadline
     }
 }
 

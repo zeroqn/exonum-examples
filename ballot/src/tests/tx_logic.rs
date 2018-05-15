@@ -125,10 +125,10 @@ fn test_post_duplicate_ballot() {
 fn test_post_ballot_with_duplicate_proposal_id() {
     let mut testkit: TestKit = TestKit::ballot_default();
 
-    let proposals_str =
-        r#"{"id": 1,"proposals": [{"id": 1, "subject": "triss", "description": "magic"}
-                                , {"id": 1, "subject": "ciri", "description": "hunter"}
-                                 ]}"#;
+    let proposals_str = r#"{"id": 1, "deadline": 100, "proposals": [
+                                {"id": 1, "subject": "triss", "description": "magic"}
+                              , {"id": 1, "subject": "ciri", "description": "hunter"}
+                            ]}"#;
     let proposals = ProposalList::try_deserialize(proposals_str.as_bytes()).unwrap();
 
     let tx_ballot = new_tx_ballot(&testkit.network().validators()[1], proposals.clone());
@@ -263,5 +263,33 @@ fn test_post_vote_for_none_exist_proposal() {
         &testkit.snapshot(),
         &tx_vote.hash(),
         ErrorCode::VotedProposalNoneExists
+    );
+}
+
+#[test]
+fn test_post_vote_for_closed_ballot() {
+    use exonum::helpers::Height;
+
+    let mut testkit: TestKit = TestKit::ballot_default();
+
+    let (_, proposals) = create_test_ballot!(testkit);
+    let proposals_hash = proposals.hash();
+    let vote_req = VoteRequest {
+        proposal_id: 1,
+        proposal_subject: "triss".to_string(),
+    };
+    let tx_vote = new_tx_vote(
+        &testkit.network().validators()[1],
+        &proposals_hash,
+        &vote_req,
+    );
+
+    testkit.create_blocks_until(Height(50));
+    testkit.create_block_with_transaction(tx_vote.clone());
+
+    assert_error_code!(
+        &testkit.snapshot(),
+        &tx_vote.hash(),
+        ErrorCode::BallotAlreadyClosed
     );
 }

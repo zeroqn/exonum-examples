@@ -18,7 +18,7 @@ macro_rules! create_test_ballot {
 }
 
 pub fn new_proposals_data() -> (String, ProposalList) {
-    let proposals_str = r#"{"id": 1,"proposals":[
+    let proposals_str = r#"{"id": 1, "deadline": 30, "proposals":[
                     {"id": 1, "subject": "triss", "description": "magic"}
                   , {"id": 2, "subject": "ciri", "description": "queen"}
                   , {"id": 3, "subject": "yennefer", "description": "magic"}

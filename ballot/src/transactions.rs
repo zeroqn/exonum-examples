@@ -103,6 +103,8 @@ impl Transaction for Ballot {
 
 impl Vote {
     fn precheck(&self, snapshot: &Snapshot) -> Result<(BallotData, usize), ServiceError> {
+        use exonum::blockchain::Schema as CoreSchema;
+        use exonum::helpers::Height;
         use self::ServiceError::*;
 
         let validator_id = validator_id(snapshot, self.from()).ok_or(UnknownSender)?;
@@ -132,6 +134,12 @@ impl Vote {
         ).map_err(|e| InvalidProposals(e))?;
         if !proposals.contains(self.proposal_id(), self.proposal_subject()) {
             Err(VotedProposalNoneExists)?
+        }
+
+        let core_schema = CoreSchema::new(snapshot);
+        let latest_height = core_schema.height();
+        if latest_height > Height(proposals.deadline()) {
+            Err(BallotAlreadyClosed)?
         }
 
         Ok((ballot_data, validator_id))

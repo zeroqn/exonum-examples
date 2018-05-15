@@ -80,9 +80,9 @@ impl BallotApiTest for TestKitApi {
 fn test_ranges_ballots() {
     let mut testkit: TestKit = TestKit::ballot_default();
     let proposals_list = vec![
-        r#"{"id": 1, "proposals": [{"id": 1, "subject": "triss", "description": "magic"}]}"#,
-        r#"{"id": 2, "proposals": [{"id": 1, "subject": "ciri", "description": "queen"}]}"#,
-        r#"{"id": 3, "proposals": [{"id": 1, "subject": "yennefer", "description": "magic"}]}"#,
+        r#"{"id": 1, "deadline": 100, "proposals": [{"id": 1, "subject": "triss", "description": "magic"}]}"#,
+        r#"{"id": 2, "deadline": 100, "proposals": [{"id": 1, "subject": "ciri", "description": "queen"}]}"#,
+        r#"{"id": 3, "deadline": 100, "proposals": [{"id": 1, "subject": "yennefer", "description": "magic"}]}"#,
     ];
     let proposals_list = proposals_list
         .iter()

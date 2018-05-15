@@ -12,6 +12,7 @@ pub enum ErrorCode {
     UnknownSender = 4,
     VotedProposalNoneExists = 5,
     AlreadyVoted = 6,
+    BallotAlreadyClosed = 7,
     InternalError = 255,
 }
 
@@ -38,6 +39,9 @@ pub(crate) enum Error {
     #[fail(display = "Already Voted")]
     AlreadyVoted,
 
+    #[fail(display = "Ballot already closed")]
+    BallotAlreadyClosed,
+
     #[fail(display = "Internal Error {}", _0)]
     InternalError(String),
 }
@@ -54,6 +58,7 @@ impl Error {
             UnknownSender => ErrorCode::UnknownSender,
             VotedProposalNoneExists => ErrorCode::VotedProposalNoneExists,
             AlreadyVoted => ErrorCode::AlreadyVoted,
+            BallotAlreadyClosed => ErrorCode::BallotAlreadyClosed,
             InternalError(_) => ErrorCode::InternalError,
         }
     }
