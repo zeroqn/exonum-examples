@@ -21,8 +21,8 @@ pub struct BallotResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoteRequest {
-    proposal_id: u64,
-    proposal_subject: String,
+    pub proposal_id: u64,
+    pub proposal_subject: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1,22 +1,12 @@
 use exonum::crypto::{self, hash, CryptoHash, Hash};
-use exonum::storage::StorageValue;
-use exonum_testkit::{TestKit, TestKitBuilder, TestNode};
+use exonum_testkit::{TestKit, TestKitBuilder};
 
 use BallotService;
 use error::ErrorCode;
 use schema::{ProposalList, Schema as BallotSchema};
 use transactions::{Ballot, Vote};
-
-macro_rules! create_test_ballot {
-    ($testkit: expr) => {{
-        let (_, proposals) = new_proposals_data();
-        let tx_ballot = new_tx_ballot(&$testkit.network().validators()[1], proposals.clone());
-        $testkit.create_block_with_transaction(tx_ballot.clone());
-        assert_eq!(tx_ballot, $testkit.find_ballot(&proposals.hash()).unwrap());
-
-        (tx_ballot, proposals)
-    }}
-}
+use api::VoteRequest;
+use tests::common::*;
 
 macro_rules! assert_error_code {
     ($snapshot: expr, $tx_hash: expr, $err_code: expr) => {{
@@ -35,43 +25,7 @@ macro_rules! assert_error_code {
     }}
 }
 
-struct VoteRequest<'a> {
-    proposals_hash: &'a Hash,
-    proposal_id: u64,
-    proposal_subject: &'a str,
-}
-
-fn new_tx_ballot(node: &TestNode, proposals: ProposalList) -> Ballot {
-    let keypair = node.service_keypair();
-    Ballot::new(
-        keypair.0,
-        ::std::str::from_utf8(proposals.into_bytes().as_slice()).unwrap(),
-        keypair.1,
-    )
-}
-
-fn new_tx_vote(node: &TestNode, vote_req: VoteRequest) -> Vote {
-    let keypair = node.service_keypair();
-    Vote::new(
-        keypair.0,
-        vote_req.proposals_hash,
-        vote_req.proposal_id,
-        vote_req.proposal_subject,
-        keypair.1,
-    )
-}
-
-fn new_proposals_data() -> (String, ProposalList) {
-    let proposals_str = r#"{"id": 1,"proposals":[
-                    {"id": 1, "subject": "triss", "description": "magic"}
-                  , {"id": 2, "subject": "ciri", "description": "queen"}
-                  , {"id": 3, "subject": "yennefer", "description": "magic"}
-                  ]}"#;
-    let proposals = ProposalList::try_deserialize(proposals_str.as_bytes()).unwrap();
-    (proposals_str.to_string(), proposals)
-}
-
-trait BallotTestKit {
+pub trait BallotTestKit {
     fn ballot_default() -> Self;
 
     fn find_ballot(&self, proposals_hash: &Hash) -> Option<Ballot>;
@@ -192,18 +146,22 @@ fn test_post_vote() {
     let mut testkit: TestKit = TestKit::ballot_default();
 
     let (_, proposals) = create_test_ballot!(testkit);
+    let proposals_hash = proposals.hash();
     let vote_req = VoteRequest {
-        proposals_hash: &proposals.hash(),
         proposal_id: 1,
-        proposal_subject: "triss",
+        proposal_subject: "triss".to_string(),
     };
-    let tx_vote = new_tx_vote(&testkit.network().validators()[1], vote_req);
+    let tx_vote = new_tx_vote(
+        &testkit.network().validators()[1],
+        &proposals_hash,
+        &vote_req,
+    );
 
-    let votes = testkit.votes(&proposals.hash());
+    let votes = testkit.votes(&proposals_hash);
     assert!(!votes.contains(&Some(tx_vote.clone())));
 
     testkit.create_block_with_transaction(tx_vote.clone());
-    let votes = testkit.votes(&proposals.hash());
+    let votes = testkit.votes(&proposals_hash);
     assert!(votes.contains(&Some(tx_vote)));
 }
 
@@ -233,11 +191,14 @@ fn test_post_vote_for_none_exist_ballot() {
 
     create_test_ballot!(testkit);
     let vote_req = VoteRequest {
-        proposals_hash: &hash("wrong".as_bytes()),
         proposal_id: 1,
-        proposal_subject: "triss",
+        proposal_subject: "triss".to_string(),
     };
-    let tx_vote = new_tx_vote(&testkit.network().validators()[1], vote_req);
+    let tx_vote = new_tx_vote(
+        &testkit.network().validators()[1],
+        &hash("wrong".as_bytes()),
+        &vote_req,
+    );
     testkit.create_block_with_transaction(tx_vote.clone());
 
     assert_error_code!(
@@ -252,21 +213,28 @@ fn test_post_vote_twice() {
     let mut testkit: TestKit = TestKit::ballot_default();
 
     let (_, proposals) = create_test_ballot!(testkit);
+    let proposals_hash = proposals.hash();
     let vote_req = VoteRequest {
-        proposals_hash: &proposals.hash(),
         proposal_id: 1,
-        proposal_subject: "triss",
+        proposal_subject: "triss".to_string(),
     };
-    let tx_vote = new_tx_vote(&testkit.network().validators()[1], vote_req);
+    let tx_vote = new_tx_vote(
+        &testkit.network().validators()[1],
+        &proposals_hash,
+        &vote_req,
+    );
     let vote_req = VoteRequest {
-        proposals_hash: &proposals.hash(),
         proposal_id: 2,
-        proposal_subject: "ciri",
+        proposal_subject: "ciri".to_string(),
     };
-    let tx_illegal_vote = new_tx_vote(&testkit.network().validators()[1], vote_req);
+    let tx_illegal_vote = new_tx_vote(
+        &testkit.network().validators()[1],
+        &proposals_hash,
+        &vote_req,
+    );
     testkit.create_block_with_transactions(txvec![tx_vote.clone(), tx_illegal_vote.clone()]);
 
-    let votes = testkit.votes(&proposals.hash());
+    let votes = testkit.votes(&proposals_hash);
     assert!(votes.contains(&Some(tx_vote)));
     assert_error_code!(
         &testkit.snapshot(),
@@ -281,11 +249,14 @@ fn test_post_vote_for_none_exist_proposal() {
 
     let (_, proposals) = create_test_ballot!(testkit);
     let vote_req = VoteRequest {
-        proposals_hash: &proposals.hash(),
         proposal_id: 99,
-        proposal_subject: "wrong",
+        proposal_subject: "wrong".to_string(),
     };
-    let tx_vote = new_tx_vote(&testkit.network().validators()[1], vote_req);
+    let tx_vote = new_tx_vote(
+        &testkit.network().validators()[1],
+        &proposals.hash(),
+        &vote_req,
+    );
     testkit.create_block_with_transaction(tx_vote.clone());
 
     assert_error_code!(
